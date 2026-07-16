@@ -1,0 +1,59 @@
+# AudioPrism Frontend
+
+Deployment-ready Vite + React frontend for the Render-friendly AudioPrism backend.
+It keeps login/history, lets users choose which stems to extract, and sends only
+those requested stem names to the API.
+
+## Environment
+
+Create `.env` locally or set these in Vercel:
+
+```text
+VITE_API_ROOT=https://your-audioprism-backend.onrender.com
+VITE_MAX_UPLOAD_MB=25
+VITE_API_PROXY_TARGET=http://127.0.0.1:8001
+```
+
+`VITE_API_ROOT` must point to the deployed backend. The app calls:
+
+```text
+POST /api/auth/register
+POST /api/auth/login
+GET  /api/auth/me
+POST /api/infer/segment
+GET  /api/infer/results
+GET  /api/stems
+```
+
+The frontend keeps the upload cap at `VITE_MAX_UPLOAD_MB`, but it does not enforce
+a duration cap. The backend controls the same behavior with `MAX_AUDIO_SECONDS=0`.
+
+For local dev, leave `VITE_API_ROOT` unset or empty so Vite proxies `/api` and
+`/output` to `VITE_API_PROXY_TARGET`. The default proxy target is
+`http://127.0.0.1:8001`.
+
+## Local Development
+
+```bash
+npm ci
+npm run dev
+```
+
+## Production Build
+
+```bash
+npm run build
+```
+
+## Vercel
+
+Import this frontend directory as a Vercel project and set:
+
+```text
+Framework preset: Vite
+Build command: npm run build
+Output directory: dist
+VITE_API_ROOT=https://your-audioprism-backend.onrender.com
+```
+
+`vercel.json` already contains the SPA rewrite needed for refreshes.
