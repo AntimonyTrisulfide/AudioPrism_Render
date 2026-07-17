@@ -40,8 +40,11 @@ type HistoryEntry = {
 
 type InferencePayload = {
   detail?: string;
+  error?: string;
   historySaved?: boolean;
+  jobId?: string;
   message?: string;
+  status?: string;
   stems?: StemResult[];
 };
 
@@ -61,6 +64,8 @@ type HomePageProps = {
 const MAX_UPLOAD_MB = Number(import.meta.env.VITE_MAX_UPLOAD_MB ?? 25);
 const UPLOAD_PROGRESS_END = 35;
 const INFERENCE_PROGRESS_END = 94;
+const INFERENCE_POLL_INTERVAL_MS = 2500;
+const INFERENCE_POLL_TIMEOUT_MS = 20 * 60 * 1000;
 const FALLBACK_STEMS: StemOption[] = [
   { name: "Vocal", label: "Vocals" },
   { name: "Guitar", label: "Guitar" },
@@ -82,6 +87,10 @@ function formatDate(value?: string) {
 
 function formatMegabytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
 function ProgressMeter({ progress }: { progress: ProcessingProgress }) {
@@ -289,6 +298,7 @@ export default function HomePage({ apiRoot = "", token, user, onLogout }: HomePa
       const form = new FormData();
       form.append("file", file);
       form.append("selected_stems", selectedStems.join(","));
+      form.append("async_inference", "1");
       const payload = await postInferenceRequest(form, file.size, selectedStems.length);
       if (!Array.isArray(payload.stems) || !payload.stems.length) {
         throw new Error("Processing completed, but the backend returned no stems.");
@@ -315,6 +325,55 @@ export default function HomePage({ apiRoot = "", token, user, onLogout }: HomePa
       clearProgressTimer();
       setProcessing(false);
     }
+  }
+
+  async function pollInferenceJob(jobId: string): Promise<InferencePayload> {
+    const deadline = Date.now() + INFERENCE_POLL_TIMEOUT_MS;
+
+    while (Date.now() < deadline) {
+      let response: Response;
+      try {
+        response = await fetch(apiUrl(`/api/infer/jobs/${encodeURIComponent(jobId)}`), { headers: authHeaders });
+      } catch (error) {
+        if (isLikelyCorsOrNetworkError(error)) {
+          throw new Error(backendConnectionMessage(root, "checking inference status"));
+        }
+        throw error;
+      }
+
+      if (response.status === 401) {
+        handleUnauthorized();
+        throw new Error("");
+      }
+
+      const payload = (await response.json().catch(() => ({}))) as InferencePayload;
+      if (response.status === 404) {
+        throw new Error(
+          "The backend lost the inference job, which usually means the Render worker restarted during processing. Try a shorter clip or move the backend to a larger instance.",
+        );
+      }
+      if (!response.ok) {
+        throw new Error(payload.detail || payload.message || "Could not check inference status.");
+      }
+
+      if (payload.status === "success" || payload.status === "cached") {
+        return payload;
+      }
+
+      if (payload.status === "failed") {
+        throw new Error(payload.detail || payload.message || payload.error || "Audio processing failed.");
+      }
+
+      setProcessingProgress((current) => ({
+        detail: payload.detail || "The backend is still separating the selected stems.",
+        label: payload.status === "queued" ? "Queued" : "Separating stems",
+        percent: Math.max(current.percent, Math.min(INFERENCE_PROGRESS_END, current.percent + 0.8)),
+      }));
+
+      await sleep(INFERENCE_POLL_INTERVAL_MS);
+    }
+
+    throw new Error("Audio processing is still running. Refresh your history in a minute.");
   }
 
   function postInferenceRequest(form: FormData, fileSize: number, stemCount: number) {
@@ -358,8 +417,7 @@ export default function HomePage({ apiRoot = "", token, user, onLogout }: HomePa
         clearProgressTimer();
         reject(new Error("Audio processing was cancelled."));
       };
-      request.onload = () => {
-        clearProgressTimer();
+      request.onload = async () => {
         let payload: InferencePayload = {};
         try {
           payload = request.responseText ? (JSON.parse(request.responseText) as InferencePayload) : {};
@@ -373,6 +431,25 @@ export default function HomePage({ apiRoot = "", token, user, onLogout }: HomePa
           return;
         }
 
+        if (request.status === 202) {
+          if (!payload.jobId) {
+            clearProgressTimer();
+            reject(new Error("The backend accepted the upload but did not return an inference job id."));
+            return;
+          }
+          startServerSideProgress();
+          try {
+            const completed = await pollInferenceJob(payload.jobId);
+            clearProgressTimer();
+            resolve(completed);
+          } catch (error) {
+            clearProgressTimer();
+            reject(error instanceof Error ? error : new Error("Audio processing failed."));
+          }
+          return;
+        }
+
+        clearProgressTimer();
         if (request.status < 200 || request.status >= 300) {
           reject(new Error(payload.detail || payload.message || "Audio processing failed."));
           return;

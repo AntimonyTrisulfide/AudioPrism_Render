@@ -22,7 +22,8 @@ frontend origin in `ALLOWED_ORIGINS`. The app calls:
 POST /api/auth/register
 POST /api/auth/login
 GET  /api/auth/me
-POST /api/infer/segment
+POST /api/infer/segment (with async_inference=1)
+GET  /api/infer/jobs/{job_id}
 GET  /api/infer/results
 GET  /api/stems
 ```
