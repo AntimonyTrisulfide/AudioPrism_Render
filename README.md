@@ -14,7 +14,9 @@ VITE_MAX_UPLOAD_MB=25
 VITE_API_PROXY_TARGET=http://127.0.0.1:8001
 ```
 
-`VITE_API_ROOT` must point to the deployed backend. The app calls:
+`VITE_API_ROOT` must point to the deployed backend and must be present before
+building/deploying the frontend. The backend must also allow the deployed
+frontend origin in `ALLOWED_ORIGINS`. The app calls:
 
 ```text
 POST /api/auth/register

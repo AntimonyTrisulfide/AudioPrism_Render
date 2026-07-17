@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { PrismLogo } from "@/components/PrismLogo";
+import { backendConnectionMessage, isLikelyCorsOrNetworkError } from "@/lib/deploymentErrors";
 
 type StemOption = {
   name: string;
@@ -157,11 +158,17 @@ export default function HomePage({ apiRoot = "", token, user, onLogout }: HomePa
       });
     } catch (error) {
       setSelectedStems((current) => (current.length ? current : FALLBACK_STEMS.map((stem) => stem.name)));
-      toast.error(error instanceof Error ? error.message : "Could not load stems.");
+      toast.error(
+        isLikelyCorsOrNetworkError(error)
+          ? backendConnectionMessage(root, "loading stems")
+          : error instanceof Error
+            ? error.message
+            : "Could not load stems.",
+      );
     } finally {
       setStemsLoading(false);
     }
-  }, [apiUrl, authHeaders, handleUnauthorized]);
+  }, [apiUrl, authHeaders, handleUnauthorized, root]);
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -172,11 +179,17 @@ export default function HomePage({ apiRoot = "", token, user, onLogout }: HomePa
       if (!response.ok) throw new Error(payload.detail || "Could not load your history.");
       setHistory(Array.isArray(payload.results) ? payload.results : []);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not load your history.");
+      toast.error(
+        isLikelyCorsOrNetworkError(error)
+          ? backendConnectionMessage(root, "loading history")
+          : error instanceof Error
+            ? error.message
+            : "Could not load your history.",
+      );
     } finally {
       setHistoryLoading(false);
     }
-  }, [apiUrl, authHeaders, handleUnauthorized]);
+  }, [apiUrl, authHeaders, handleUnauthorized, root]);
 
   useEffect(() => {
     void loadStemCatalog();
@@ -339,7 +352,7 @@ export default function HomePage({ apiRoot = "", token, user, onLogout }: HomePa
 
       request.onerror = () => {
         clearProgressTimer();
-        reject(new Error("Network error while processing audio."));
+        reject(new Error(backendConnectionMessage(root, "processing audio")));
       };
       request.onabort = () => {
         clearProgressTimer();

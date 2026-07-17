@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PrismLogo } from "@/components/PrismLogo";
+import { backendConnectionMessage, isLikelyCorsOrNetworkError } from "@/lib/deploymentErrors";
 
 type LoginForm = { email: string; password: string };
 type SignupForm = { username: string; email: string; password: string; confirmPassword: string };
@@ -27,11 +28,19 @@ export default function AuthPage({ apiBase = "/api/auth", onAuthenticated }: Aut
   async function request(path: string, body: object) {
     setLoading(true);
     try {
-      const response = await fetch(`${apiBase.replace(/\/$/, "")}/${path}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      let response: Response;
+      try {
+        response = await fetch(`${apiBase.replace(/\/$/, "")}/${path}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      } catch (error) {
+        if (isLikelyCorsOrNetworkError(error)) {
+          throw new Error(backendConnectionMessage(apiBase, "authenticating"));
+        }
+        throw error;
+      }
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.detail || "Authentication failed.");
       if (!payload.token) throw new Error("The backend did not return a session token.");
