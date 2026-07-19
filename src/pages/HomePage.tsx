@@ -44,6 +44,7 @@ type InferencePayload = {
   historySaved?: boolean;
   jobId?: string;
   message?: string;
+  progress?: Partial<ProcessingProgress>;
   status?: string;
   stems?: StemResult[];
 };
@@ -390,10 +391,17 @@ export default function HomePage({ apiRoot = "", token, user, onLogout }: HomePa
         throw new Error(payload.detail || payload.message || payload.error || "Audio processing failed.");
       }
 
+      const reportedPercent =
+        typeof payload.progress?.percent === "number"
+          ? Math.min(INFERENCE_PROGRESS_END, Math.max(UPLOAD_PROGRESS_END, payload.progress.percent))
+          : null;
       setProcessingProgress((current) => ({
-        detail: payload.detail || "The backend is still separating the selected stems.",
-        label: payload.status === "queued" ? "Queued" : "Separating stems",
-        percent: Math.max(current.percent, Math.min(INFERENCE_PROGRESS_END, current.percent + 0.8)),
+        detail: payload.progress?.detail || payload.detail || "The backend is still separating the selected stems.",
+        label: payload.progress?.label || (payload.status === "queued" ? "Queued" : "Separating stems"),
+        percent:
+          reportedPercent === null
+            ? Math.max(current.percent, Math.min(INFERENCE_PROGRESS_END, current.percent + 0.8))
+            : Math.max(current.percent, reportedPercent),
       }));
 
       await sleep(INFERENCE_POLL_INTERVAL_MS);
