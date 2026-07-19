@@ -66,6 +66,7 @@ const UPLOAD_PROGRESS_END = 35;
 const INFERENCE_PROGRESS_END = 94;
 const INFERENCE_POLL_INTERVAL_MS = 2500;
 const INFERENCE_POLL_TIMEOUT_MS = 20 * 60 * 1000;
+const MAX_TRANSIENT_POLL_FAILURES = 5;
 const FALLBACK_STEMS: StemOption[] = [
   { name: "Vocal", label: "Vocals" },
   { name: "Guitar", label: "Guitar" },
@@ -179,7 +180,7 @@ export default function HomePage({ apiRoot = "", token, user, onLogout }: HomePa
     }
   }, [apiUrl, authHeaders, handleUnauthorized, root]);
 
-  const loadHistory = useCallback(async () => {
+  const loadHistory = useCallback(async (showErrors = true) => {
     setHistoryLoading(true);
     try {
       const response = await fetch(apiUrl("/api/infer/results"), { headers: authHeaders });
@@ -188,13 +189,15 @@ export default function HomePage({ apiRoot = "", token, user, onLogout }: HomePa
       if (!response.ok) throw new Error(payload.detail || "Could not load your history.");
       setHistory(Array.isArray(payload.results) ? payload.results : []);
     } catch (error) {
-      toast.error(
-        isLikelyCorsOrNetworkError(error)
-          ? backendConnectionMessage(root, "loading history")
-          : error instanceof Error
-            ? error.message
-            : "Could not load your history.",
-      );
+      if (showErrors) {
+        toast.error(
+          isLikelyCorsOrNetworkError(error)
+            ? backendConnectionMessage(root, "loading history")
+            : error instanceof Error
+              ? error.message
+              : "Could not load your history.",
+        );
+      }
     } finally {
       setHistoryLoading(false);
     }
@@ -309,7 +312,7 @@ export default function HomePage({ apiRoot = "", token, user, onLogout }: HomePa
         percent: 100,
       });
       setResults(payload.stems);
-      await loadHistory();
+      void loadHistory(false);
       if (payload.historySaved === false) {
         toast.warning("Stems are ready, but MongoDB history could not be updated.");
       } else {
@@ -329,12 +332,23 @@ export default function HomePage({ apiRoot = "", token, user, onLogout }: HomePa
 
   async function pollInferenceJob(jobId: string): Promise<InferencePayload> {
     const deadline = Date.now() + INFERENCE_POLL_TIMEOUT_MS;
+    let transientFailures = 0;
 
     while (Date.now() < deadline) {
       let response: Response;
       try {
         response = await fetch(apiUrl(`/api/infer/jobs/${encodeURIComponent(jobId)}`), { headers: authHeaders });
       } catch (error) {
+        if (isLikelyCorsOrNetworkError(error) && transientFailures < MAX_TRANSIENT_POLL_FAILURES) {
+          transientFailures += 1;
+          setProcessingProgress((current) => ({
+            detail: "The backend is busy; reconnecting to the inference job.",
+            label: "Reconnecting",
+            percent: Math.max(current.percent, UPLOAD_PROGRESS_END),
+          }));
+          await sleep(INFERENCE_POLL_INTERVAL_MS);
+          continue;
+        }
         if (isLikelyCorsOrNetworkError(error)) {
           throw new Error(backendConnectionMessage(root, "checking inference status"));
         }
@@ -346,6 +360,18 @@ export default function HomePage({ apiRoot = "", token, user, onLogout }: HomePa
         throw new Error("");
       }
 
+      if (response.status >= 500 && transientFailures < MAX_TRANSIENT_POLL_FAILURES) {
+        transientFailures += 1;
+        setProcessingProgress((current) => ({
+          detail: "The backend is still recovering; checking again shortly.",
+          label: "Reconnecting",
+          percent: Math.max(current.percent, UPLOAD_PROGRESS_END),
+        }));
+        await sleep(INFERENCE_POLL_INTERVAL_MS);
+        continue;
+      }
+
+      transientFailures = 0;
       const payload = (await response.json().catch(() => ({}))) as InferencePayload;
       if (response.status === 404) {
         throw new Error(
