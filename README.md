@@ -11,6 +11,7 @@ Create `.env` locally or set these in Vercel:
 ```text
 VITE_API_ROOT=https://your-audioprism-backend.onrender.com
 VITE_MAX_UPLOAD_MB=25
+VITE_MAX_AUDIO_SECONDS=60
 VITE_API_PROXY_TARGET=http://127.0.0.1:8001
 ```
 
@@ -28,8 +29,9 @@ GET  /api/infer/results
 GET  /api/stems
 ```
 
-The frontend keeps the upload cap at `VITE_MAX_UPLOAD_MB`, but it does not enforce
-a duration cap. The backend controls the same behavior with `MAX_AUDIO_SECONDS=0`.
+The frontend checks `VITE_MAX_UPLOAD_MB` and `VITE_MAX_AUDIO_SECONDS` before
+uploading when browser metadata is available. The backend still enforces the
+real cap with `MAX_AUDIO_SECONDS`.
 
 For local dev, leave `VITE_API_ROOT` unset or empty so Vite proxies `/api` and
 `/output` to `VITE_API_PROXY_TARGET`. The default proxy target is

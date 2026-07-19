@@ -63,6 +63,7 @@ type HomePageProps = {
 };
 
 const MAX_UPLOAD_MB = Number(import.meta.env.VITE_MAX_UPLOAD_MB ?? 25);
+const MAX_AUDIO_SECONDS = Number(import.meta.env.VITE_MAX_AUDIO_SECONDS ?? 60);
 const UPLOAD_PROGRESS_END = 35;
 const INFERENCE_PROGRESS_END = 94;
 const INFERENCE_POLL_INTERVAL_MS = 2500;
@@ -89,6 +90,41 @@ function formatDate(value?: string) {
 
 function formatMegabytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDuration(seconds: number) {
+  const rounded = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(rounded / 60);
+  const remainingSeconds = rounded % 60;
+  if (!minutes) return `${remainingSeconds}s`;
+  return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+}
+
+function readAudioDuration(file: File) {
+  return new Promise<number | null>((resolve) => {
+    const url = URL.createObjectURL(file);
+    const audio = document.createElement("audio");
+    let settled = false;
+
+    const finish = (duration: number | null) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      audio.removeAttribute("src");
+      audio.load();
+      URL.revokeObjectURL(url);
+      resolve(duration);
+    };
+
+    const timeoutId = window.setTimeout(() => finish(null), 5000);
+    audio.preload = "metadata";
+    audio.onloadedmetadata = () => {
+      const duration = Number.isFinite(audio.duration) ? audio.duration : null;
+      finish(duration);
+    };
+    audio.onerror = () => finish(null);
+    audio.src = url;
+  });
 }
 
 function sleep(ms: number) {
@@ -289,6 +325,20 @@ export default function HomePage({ apiRoot = "", token, user, onLogout }: HomePa
   async function processAudio() {
     if (!file) return toast.error("Choose an audio file first.");
     if (!selectedStems.length) return toast.error("Select at least one stem.");
+    if (MAX_AUDIO_SECONDS > 0) {
+      const duration = await readAudioDuration(file);
+      if (duration !== null && duration > MAX_AUDIO_SECONDS) {
+        toast.error(
+          `Audio must be ${formatDuration(MAX_AUDIO_SECONDS)} or shorter. This file is ${formatDuration(duration)}.`,
+        );
+        setProcessingProgress({
+          detail: `Choose a clip up to ${formatDuration(MAX_AUDIO_SECONDS)}.`,
+          label: "Audio too long",
+          percent: 0,
+        });
+        return;
+      }
+    }
 
     setProcessing(true);
     setResults([]);
@@ -553,7 +603,9 @@ export default function HomePage({ apiRoot = "", token, user, onLogout }: HomePa
                   ? "The catcher is ready."
                   : file
                     ? `${formatMegabytes(file.size)} selected`
-                    : `MP3, WAV, FLAC, M4A, AAC, or OGG up to ${MAX_UPLOAD_MB} MB.`}
+                    : `MP3, WAV, FLAC, M4A, AAC, or OGG up to ${MAX_UPLOAD_MB} MB${
+                        MAX_AUDIO_SECONDS > 0 ? ` and ${formatDuration(MAX_AUDIO_SECONDS)}` : ""
+                      }.`}
               </span>
             </span>
             {file && (
